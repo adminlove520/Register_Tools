@@ -144,56 +144,146 @@ def get_verification_code(driver):
     max_attempts = 5
     for attempt in range(max_attempts):
         logging.info(f"尝试获取验证码 (第 {attempt+1}/{max_attempts} 次)")
-        time.sleep(5)  # 等待邮件到达
+        time.sleep(8 if attempt == 0 else 5)  # 第一次等待更长时间
         
         try:
             # 刷新页面确保邮件显示
             driver.refresh()
-            time.sleep(3)
+            
+            # 等待页面加载完成
+            try:
+                WebDriverWait(driver, 15).until(
+                    lambda d: d.execute_script('return document.readyState') == 'complete'
+                )
+            except:
+                pass  # 即使等待超时也继续执行
+            
+            time.sleep(2)
             
             # 获取整个页面文本，尝试直接从页面中提取验证码
             page_source = driver.page_source
+            page_text = driver.find_element(By.TAG_NAME, 'body').text
             
             # 尝试多种格式提取验证码
             patterns = [
                 r'验证码：(\d{6})',
                 r'DayDayMap验证码：(\d{6})',
                 r'【盛邦安全】.*?：(\d{6})',
-                r'(\d{6})',  # 兜底：任意6位数字
+                r'验证码是(\d{6})',
+                r'验证码为(\d{6})',
+                r'code：(\d{6})',
+                r'code is (\d{6})',
+                r'您的验证码是(\d{6})',
+                r'为您的账号安全，您的验证码是：(\d{6})',
+                r'(?<!\d)(\d{6})(?!\d)',  # 独立的6位数字，不与其他数字相连
             ]
             
+            # 先从可见文本中提取
+            logging.info("尝试从页面可见文本中提取验证码...")
+            for pattern in patterns:
+                code_match = re.search(pattern, page_text)
+                if code_match:
+                    code = code_match.group(1)
+                    if len(code) == 6 and code.isdigit():
+                        # 验证这不是日期或时间格式
+                        if not (code.startswith('20') and len(code) == 6):
+                            logging.info(f"从可见文本成功获取验证码: {code}")
+                            return code
+            
+            # 再从页面源码中提取
+            logging.info("尝试从页面源码中提取验证码...")
             for pattern in patterns:
                 code_match = re.search(pattern, page_source)
                 if code_match:
                     code = code_match.group(1)
-                    # 确保是6位数字
                     if len(code) == 6 and code.isdigit():
-                        logging.info(f"成功获取验证码: {code}")
-                        return code
+                        if not (code.startswith('20') and len(code) == 6):
+                            logging.info(f"从页面源码成功获取验证码: {code}")
+                            return code
             
             # 尝试查找邮件列表元素并点击查看
             try:
-                # 查找所有可能的邮件元素
-                potential_emails = driver.find_elements(By.XPATH, "//div | //tr | //td | //span")
-                for element in potential_emails:
-                    text = element.text
-                    if '验证码' in text or '盛邦安全' in text:
-                        try:
-                            element.click()
-                            time.sleep(2)
-                            # 再次尝试提取验证码
-                            new_page_source = driver.page_source
-                            for pattern in patterns:
-                                code_match = re.search(pattern, new_page_source)
-                                if code_match:
-                                    code = code_match.group(1)
-                                    if len(code) == 6 and code.isdigit():
-                                        logging.info(f"点击邮件后成功获取验证码: {code}")
-                                        return code
-                        except:
-                            pass
+                logging.info("尝试查找并点击邮件元素...")
+                # 使用更精确的邮件元素定位
+                email_selectors = [
+                    "//div[contains(@class, 'mail-item')]",
+                    "//tr[contains(@class, 'mail-row')]",
+                    "//div[contains(text(), '验证码') or contains(text(), 'Verification')]",
+                    "//a[contains(text(), '盛邦安全') or contains(text(), 'SafeDog')]",
+                    "//div[contains(@class, 'email-content')]",
+                    "//div[contains(@id, 'mail')]",
+                ]
+                
+                found_mail = False
+                for selector in email_selectors:
+                    try:
+                        potential_emails = driver.find_elements(By.XPATH, selector)
+                        if potential_emails:
+                            logging.info(f"通过选择器 '{selector}' 找到 {len(potential_emails)} 个邮件元素")
+                            for element in potential_emails[:3]:  # 只检查前3个
+                                try:
+                                    text = element.text
+                                    if text.strip():
+                                        logging.info(f"检查邮件元素文本: {text[:50]}...")
+                                        if '验证码' in text or '盛邦安全' in text or 'SafeDog' in text:
+                                            # 滚动到元素可见
+                                            driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                                            time.sleep(1)
+                                            
+                                            # 尝试点击
+                                            try:
+                                                element.click()
+                                                logging.info("成功点击邮件元素")
+                                            except:
+                                                # 使用JavaScript点击
+                                                driver.execute_script("arguments[0].click();", element)
+                                                logging.info("通过JavaScript点击邮件元素")
+                                            
+                                            time.sleep(3)
+                                            found_mail = True
+                                            
+                                            # 再次尝试提取验证码
+                                            new_page_source = driver.page_source
+                                            new_page_text = driver.find_element(By.TAG_NAME, 'body').text
+                                            
+                                            for pattern in patterns:
+                                                # 先检查可见文本
+                                                code_match = re.search(pattern, new_page_text)
+                                                if code_match:
+                                                    code = code_match.group(1)
+                                                    if len(code) == 6 and code.isdigit():
+                                                        logging.info(f"点击邮件后从可见文本获取验证码: {code}")
+                                                        return code
+                                                # 再检查源码
+                                                code_match = re.search(pattern, new_page_source)
+                                                if code_match:
+                                                    code = code_match.group(1)
+                                                    if len(code) == 6 and code.isdigit():
+                                                        logging.info(f"点击邮件后从源码获取验证码: {code}")
+                                                        return code
+                                                
+                                            # 如果点击后没找到，继续尝试下一个元素
+                                except Exception as inner_e:
+                                    logging.warning(f"处理邮件元素时出错: {inner_e}")
+                        
+                        if found_mail:
+                            break
+                    except Exception as sel_e:
+                        logging.warning(f"使用选择器 '{selector}' 查找邮件时出错: {sel_e}")
+                        
             except Exception as e:
                 logging.warning(f"查找邮件元素时出错: {e}")
+            
+            # 最后尝试直接提取所有6位数字
+            logging.info("尝试直接提取所有6位数字...")
+            all_digits = re.findall(r'(?<!\d)(\d{6})(?!\d)', page_text)
+            if all_digits:
+                # 选择最有可能的验证码（通常是页面中唯一的6位数字或最后出现的）
+                for code in reversed(all_digits):  # 从后往前检查
+                    if len(code) == 6 and code.isdigit():
+                        if not (code.startswith('20') and len(code) == 6):
+                            logging.info(f"直接提取6位数字作为验证码: {code}")
+                            return code
             
             logging.info(f"第 {attempt+1} 次尝试未找到验证码，继续等待...")
             
@@ -487,30 +577,98 @@ def register_account():
 def save_result(result):
     try:
         # 确保文件路径正确
-        file_path = 'results.md'
+        import os
+        file_path = os.path.join(os.getcwd(), 'results.md')
+        
+        # 清理和安全化数据
+        def sanitize_value(value):
+            if value is None:
+                return "None"
+            # 转换为字符串并处理可能的编码问题
+            value_str = str(value)
+            # 替换表格分隔符和换行符
+            value_str = value_str.replace("|", "-")
+            value_str = value_str.replace("\n", " ")
+            # 限制长度
+            if len(value_str) > 100:
+                value_str = value_str[:97] + "..."
+            return value_str
+        
+        # 准备安全的结果数据
+        safe_result = {
+            'email': sanitize_value(result.get('email', '未知')),
+            'nickname': sanitize_value(result.get('nickname', '未知')),
+            'password': sanitize_value(result.get('password', '未知')),
+            'code': sanitize_value(result.get('code', '-')),
+            'success': result.get('success', False),
+            'error': sanitize_value(result.get('error', '-'))
+        }
         
         # 读取现有结果
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 existing_content = f.read()
         except FileNotFoundError:
+            # 使用更简单的表头，避免特殊字符
+            existing_content = "# 注册结果\n\n"
+            existing_content += "| 邮箱 | 昵称 | 密码 | 验证码 | 注册状态 | 错误信息 |\n"
+            existing_content += "|------|------|------|--------|----------|----------|\n"
+        except UnicodeDecodeError:
+            # 如果编码错误，重新创建文件
+            logging.warning("文件编码错误，重新创建结果文件")
             existing_content = "# 注册结果\n\n"
             existing_content += "| 邮箱 | 昵称 | 密码 | 验证码 | 注册状态 | 错误信息 |\n"
             existing_content += "|------|------|------|--------|----------|----------|\n"
         
-        # 添加新结果
-        status = "✅ 成功" if result['success'] else "❌ 失败"
-        error_info = result.get('error', '-')
+        # 添加新结果，使用简单的状态表示
+        status = "成功" if safe_result['success'] else "失败"
         
-        new_line = f"| {result['email']} | {result['nickname']} | {result['password']} | {result.get('code', '-')} | {status} | {error_info} |\n"
+        # 构建新行，确保所有字段都被正确处理
+        new_line = f"| {safe_result['email']} | {safe_result['nickname']} | {safe_result['password']} | {safe_result['code']} | {status} | {safe_result['error']} |\n"
         
-        # 写入文件
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(existing_content + new_line)
+        # 写入文件 - 尝试多种编码
+        encoding_success = False
+        encodings_to_try = ['utf-8', 'utf-8-sig', 'gbk', 'cp936']
         
-        logging.info(f"结果已保存到 {file_path}")
+        for encoding in encodings_to_try:
+            try:
+                with open(file_path, 'w', encoding=encoding) as f:
+                    f.write(existing_content + new_line)
+                logging.info(f"结果已使用{encoding}编码保存到 {file_path}")
+                encoding_success = True
+                break
+            except Exception as enc_e:
+                logging.warning(f"使用{encoding}编码保存失败: {enc_e}")
+        
+        # 如果所有编码都失败，使用二进制模式保存
+        if not encoding_success:
+            try:
+                # 将字符串转换为字节，替换无法编码的字符
+                content_bytes = (existing_content + new_line).encode('utf-8', errors='replace')
+                with open(file_path, 'wb') as f:
+                    f.write(content_bytes)
+                logging.info(f"使用二进制模式成功保存结果到 {file_path}")
+            except Exception as binary_e:
+                logging.error(f"所有保存方式都失败: {binary_e}")
+                # 最后尝试打印到控制台
+                print("\n===== 无法保存到文件，结果如下 =====")
+                print(f"邮箱: {safe_result['email']}")
+                print(f"昵称: {safe_result['nickname']}")
+                print(f"密码: {safe_result['password']}")
+                print(f"验证码: {safe_result['code']}")
+                print(f"注册状态: {status}")
+                print(f"错误信息: {safe_result['error']}")
+                print("=================================\n")
+    
     except Exception as e:
         logging.error(f"保存结果时出错: {e}")
+        # 紧急打印结果到控制台
+        try:
+            print("\n紧急结果输出:")
+            for key, value in result.items():
+                print(f"{key}: {value}")
+        except:
+            pass
 
 # 执行注册
 if __name__ == "__main__":
