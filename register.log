@@ -1,9 +1,5 @@
-2025-11-10 19:59:12,233 - INFO - ====== WebDriver manager ======
-2025-11-10 19:59:13,587 - INFO - Get LATEST chromedriver version for google-chrome
-2025-11-10 20:07:56,897 - INFO - 开始注册过程...
-2025-11-10 20:07:56,898 - INFO - ====== WebDriver manager ======
-2025-11-10 20:07:58,333 - INFO - Get LATEST chromedriver version for google-chrome
-2025-11-10 20:08:03,814 - ERROR - 注册过程出错: Could not reach host. Are you offline?
-2025-11-10 20:08:03,815 - INFO - 结果已使用utf-8编码保存到 D:\safePro\Register-tools\results.md
-2025-11-10 20:08:03,815 - INFO - 注册过程完成。
-2025-11-10 20:08:03,816 - INFO - 注册结果保存在: D:\safePro\Register-tools\results.md
+2025-11-11 11:55:40,134 - INFO - 开始注册过程...
+2025-11-11 11:55:40,135 - INFO - 找到ChromeDriver: D:\safePro\Register-tools\chromedriver.exe
+2025-11-11 11:55:40,135 - INFO - 
+===== 网站连接测试 =====
+2025-11-11 11:55:40,136 - INFO - 测试网络连接: http://mail0.dfyx.xyz/
