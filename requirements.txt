@@ -2,3 +2,5 @@ selenium
 webdriver-manager
 pypinyin
 requests
+pyperclip
+pywin32
